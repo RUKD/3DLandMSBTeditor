@@ -494,7 +494,7 @@ namespace MsbtEditor
 			{
 				Settings.Default.XMSBTDirectory = new FileInfo(sfd.FileName).DirectoryName;
 
-				string result = _msbt.ExportXMSBT(sfd.FileName);
+				string result = _msbt.ExportXMSBT(sfd.FileName,false);
 
 				MessageBox.Show(result, "XMSBT Export Result", MessageBoxButtons.OK, MessageBoxIcon.Information);
 			}
@@ -540,16 +540,24 @@ namespace MsbtEditor
 			if (fbd.ShowDialog() == DialogResult.OK)
 			{
 				Settings.Default.XMSBTDirectory = fbd.SelectedPath;
-
-				if (Directory.Exists(fbd.SelectedPath))
+				if(Directory.Exists(fbd.SelectedPath))
 				{
-					DirectoryInfo dir = new DirectoryInfo(fbd.SelectedPath);
-					FileInfo[] files = dir.GetFiles("*.msbt");
+					//select destination directory
+					FolderBrowserDialog fbdTarget = new FolderBrowserDialog();
+					fbdTarget.Description = "Select the destination directory to export the XMSBT files:";
+					if (fbdTarget.ShowDialog() != DialogResult.OK)
+						return;
+
+					string sourceRoot = fbd.SelectedPath;
+					string targetRoot = fbdTarget.SelectedPath;
+					DirectoryInfo dir = new DirectoryInfo(sourceRoot);
+					// 获取所有子目录下的msbt文件
+					FileInfo[] files = dir.GetFiles("*.msbt", SearchOption.AllDirectories);
 					bool overwrite = true;
 					string result = "";
 
-					if (dir.GetFiles("*.xmsbt").Length > 0)
-						overwrite = MessageBox.Show("Is it OK to overwrite XMSBT files in the directory?", "Overwrite?", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+					if (Directory.GetFiles(targetRoot, "*.xmsbt", SearchOption.AllDirectories).Length > 0)
+						overwrite = MessageBox.Show("override the xmsbt files in the destination directory?", "overwrite confirmation", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
 
 					if (files.Length > 0)
 					{
@@ -557,8 +565,23 @@ namespace MsbtEditor
 						{
 							try
 							{
+								// 计算相对路径
+								string relativePath = file.FullName.Substring(sourceRoot.Length);
+								if (relativePath.StartsWith("\\")) 
+									relativePath = relativePath.Substring(1);
+								
+								// 构建目标路径
+								string targetPath = Path.Combine(targetRoot, relativePath);
+								string targetDir = Path.GetDirectoryName(targetPath);
+								string targetFile = Path.ChangeExtension(targetPath, ".xmsbt");
+
+								// 确保目标目录存在
+								if (!Directory.Exists(targetDir))
+									Directory.CreateDirectory(targetDir);
+
+								// 导出文件
 								MSBT msbt = new MSBT(file.FullName);
-								msbt.ExportXMSBT(file.FullName.Substring(0, file.FullName.Length - 4) + "xmsbt", overwrite);
+								msbt.ExportXMSBT(targetFile, false, overwrite);
 							}
 							catch (Exception ex)
 							{
@@ -567,13 +590,14 @@ namespace MsbtEditor
 						}
 
 						if (result.Length == 0)
-							result = "Successfully batch exported files to XMSBT.";
+							result = "exported successfully";
 					}
 					else
-						result = "There are no MSBT files to export in the selected directory.";
+						result = "no msbt files found in the selected directory.";
 
-					MessageBox.Show(result, "XMSBT Batch Export Result", MessageBoxButtons.OK, MessageBoxIcon.Information);
+					MessageBox.Show(result, "xmsbt batch export result", MessageBoxButtons.OK, MessageBoxIcon.Information);
 				}
+				
 			}
 
 			Settings.Default.Save();
@@ -715,7 +739,33 @@ namespace MsbtEditor
 			Settings.Default.Save();
 			Settings.Default.Reload();
 		}
+		private void extractUMSBTInFolderToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			FolderBrowserDialog fbd = new FolderBrowserDialog();
+			fbd.Description = "Select the source directory containing UMSBT files:";
+			fbd.SelectedPath = Settings.Default.BG4OpenDirectory;
 
+			if (fbd.ShowDialog() == DialogResult.OK)
+			{
+				Settings.Default.BG4OpenDirectory = fbd.SelectedPath;
+				
+				//select destination folder
+				FolderBrowserDialog fbd2 = new FolderBrowserDialog();
+				fbd2.Description = "Select the destination directory to extract the files into:";
+				fbd2.SelectedPath = Settings.Default.BG4ExtractDirectory;
+
+				if (fbd2.ShowDialog() == DialogResult.OK)
+				{
+					//iterator all usmbt file in the source folder , then extract them to the destination folder with same name and path
+					foreach (FileInfo file in new DirectoryInfo(fbd.SelectedPath).GetFiles("*.umsbt"))
+					{
+						MsbtEditor.UMSBT.UMSBT.Extract(file.FullName, fbd2.SelectedPath, true);
+					}
+				}
+				
+			}
+			
+		}
 		private void packUMSBTToolStripMenuItem_Click(object sender, EventArgs e)
 		{
 			FolderBrowserDialog fbd = new FolderBrowserDialog();

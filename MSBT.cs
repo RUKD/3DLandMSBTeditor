@@ -186,8 +186,9 @@ namespace MsbtEditor
 		public ATR1 ATR1 = new ATR1();
 		public TSY1 TSY1 = new TSY1();
 		public TXT2 TXT2 = new TXT2();
-		public Encoding FileEncoding = Encoding.Unicode;
-		public List<string> SectionOrder = new List<string>();
+		//public Encoding FileEncoding = Encoding.Unicode;
+		public Encoding FileEncoding = new UnicodeEncoding(false,true,true);
+        public List<string> SectionOrder = new List<string>();
 		public bool HasLabels = false;
 
 		private byte paddingChar = 0xAB;
@@ -823,7 +824,7 @@ namespace MsbtEditor
 			return result;
 		}
 
-		public string ExportXMSBT(string filename, bool overwrite = true)
+		public string ExportXMSBT(string filename,bool withTag = true, bool overwrite = true)
 		{
 			string result = "Successfully exported to XMSBT.";
 
@@ -836,12 +837,15 @@ namespace MsbtEditor
 						XmlDocument xmlDocument = new XmlDocument();
 
 						XmlWriterSettings xmlSettings = new XmlWriterSettings();
-						xmlSettings.Encoding = FileEncoding;
-						xmlSettings.Indent = true;
+                        Encoding encoding = Encoding.GetEncoding("utf-16", new EncoderReplacementFallback(""),new DecoderReplacementFallback(""));
+                        xmlSettings.Encoding = encoding;
+						
+
+                        xmlSettings.Indent = true;
 						xmlSettings.IndentChars = "\t";
 						xmlSettings.CheckCharacters = false;
 
-						XmlDeclaration xmlDeclaration = xmlDocument.CreateXmlDeclaration("1.0", FileEncoding.WebName, null);
+						XmlDeclaration xmlDeclaration = xmlDocument.CreateXmlDeclaration("1.0", encoding.WebName, null);
 						xmlDocument.AppendChild(xmlDeclaration);
 
 						XmlElement xmlRoot = xmlDocument.CreateElement("xmsbt");
@@ -857,11 +861,22 @@ namespace MsbtEditor
 							xmlEntry.Attributes.Append(xmlLabelAttribute);
 
 							XmlElement xmlString = xmlDocument.CreateElement("text");
-							xmlString.InnerText = FileEncoding.GetString(lbl.String.Value).Replace("\n", "\r\n").TrimEnd('\0').Replace("\0", @"\0");
-							xmlEntry.AppendChild(xmlString);
+							xmlString.InnerText = encoding.GetString(ParseLblString(lbl.String.Value,withTag)).Replace("\n", "\r\n").TrimEnd('\0');
+                            string withoutKatakana = Regex.Replace(xmlString.InnerText, @"[\u3040-\u309F\u30A0-\u30FF\uFF65-\uFF9F]", "");
+                            xmlString.InnerText = withoutKatakana;
+
+
+
+                            // xmlString.InnerText = encoding.GetString(lbl.String.Value).Replace("\n", "\r\n").TrimEnd('\0').Replace("\0", "");
+                            // string withoutEntities = Regex.Replace(xmlString.InnerText, @"[\u0000-\u001f\uFFFF\u0028\u0029\u0024\u0025\u0026]", "");
+                            // string withoutKatakana = Regex.Replace(withoutEntities,@"[\u3040-\u309F\u30A0-\u30FF\uFF65-\uFF9F]","");
+                            // //string cleaned = withoutKatakana.Replace(@"\0", "");
+                            // xmlString.InnerText = withoutKatakana;
+                            // xmlString.InnerText = Regex.Replace(xmlString.InnerText, @"[^\u0020-\u007F\u4E00-\u9FFF\u3000-\u303F]", "");
+                            xmlEntry.AppendChild(xmlString);
 						}
 
-						System.IO.StreamWriter stream = new StreamWriter(filename, false, FileEncoding);
+						System.IO.StreamWriter stream = new StreamWriter(filename, false, encoding);
 						xmlDocument.Save(XmlWriter.Create(stream, xmlSettings));
 						stream.Close();
 					}
@@ -1002,6 +1017,78 @@ namespace MsbtEditor
 			}
 
 			return result;
+		}
+
+
+		//lbl string is utf-16 string with many tag
+		//tag is be orgnized like this
+		//Offset (h)	Size	Data Type	Description
+		//0x00	2	u16	Signature (0e 00 or 0f 00)
+		//0x02	2	u16	Tag Group
+		//0x04	2	u16	Tag Type
+		//0x06	2	u16	Extra Data Size (this value is ignored for 00 0f tags which haveno data)
+		//0x08	?	?	Extra data (size is dependent on Extra Data Size, type isdependent on Group and Type)
+		//turn this tag to <tag group="tagGroup" type="tagType"data="extraDataInHexFormat">
+		public byte[] ParseLblString(byte[] value,bool withTag)
+		{
+			List<byte> result = new List<byte>();
+			int i = 0;
+			while (i < value.Length)
+			{
+				// 检查是否是标签开始（0x0E 00或0x0F 00）
+				if (i + 1 < value.Length && value[i] == 0x0E && value[i + 1] == 0x00 || 
+					value[i] == 0x0F && value[i + 1] == 0x00)
+				{
+					// 读取标签头
+					byte signature = value[i];
+					ushort tagGroup = BitConverter.ToUInt16(value, i + 2);
+					ushort tagType = BitConverter.ToUInt16(value, i + 4);
+					ushort extraDataSize = BitConverter.ToUInt16(value, i + 6);
+
+					// 构建标签字符串
+					string tagStr = $"[tag group=\"{tagGroup.ToString("X4")}\" type=\"{tagType.ToString("X4")}\"";
+					
+					// 如果是0x0E标签且有额外数据
+					if (signature == 0x0E && extraDataSize > 0)
+					{
+						tagStr += " data=\"";
+						for (int j = 0; j < extraDataSize; j++)
+						{
+							if (i + 8 + j < value.Length)
+							{
+								tagStr += value[i + 8 + j].ToString("X2");
+							}
+						}
+						tagStr += "\"";
+						i += 8 + extraDataSize;
+					}
+					else
+					{
+						i += 8;
+					}
+					tagStr += "]";
+
+                    // 将标签字符串转换为UTF-16字节数组
+                    Encoding encoding = Encoding.GetEncoding("utf-16", new EncoderReplacementFallback(""), new DecoderReplacementFallback(""));
+                    byte[] tagBytes = encoding.GetBytes(tagStr);
+					if(withTag)
+					{
+						result.AddRange(tagBytes);
+					}
+						
+				}
+				else
+				{
+					// 普通字符（已经是UTF-16）
+					if (i + 1 < value.Length)
+					{
+						result.Add(value[i]);
+						result.Add(value[i + 1]);
+					}
+					i += 2;
+				}
+			}
+			return result.ToArray();
 		}
 	}
 }

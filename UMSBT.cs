@@ -59,11 +59,12 @@ namespace MsbtEditor.UMSBT
 					}
 
 					// Extract!
-					for (int i = 0; i < entries.Count; i++)
+					for (int i = 0; i < 1;/*entries.Count*/ i++)
 					{
 						FileEntry fe = entries[i];
 						string extension = ".msbt";
-						string outFile = Path.Combine(path, fe.Index.ToString("00000000") + extension);
+						//use the same name as the original file but with the extension .msbt
+						string outFile = Path.Combine(path, Path.GetFileNameWithoutExtension(filename) + extension);
 
 						Debug.Print("[" + fe.Offset.ToString("X8") + "] " + fe.Index + extension);
 
